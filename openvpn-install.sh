@@ -2,7 +2,7 @@
 # shellcheck disable=SC1091,SC2164,SC2034,SC1072,SC1073,SC1009
 
 # Secure OpenVPN server installer for Debian, Ubuntu, CentOS, Amazon Linux 2, Fedora, Oracle Linux 8, Arch Linux, Rocky Linux and AlmaLinux.
-# https://github.com/angristan/openvpn-install
+# Modified version with multiple client generation and custom subnet access
 
 function isRoot() {
 	if [ "$EUID" -ne 0 ]; then
@@ -25,7 +25,7 @@ function checkOS() {
 			if [[ $VERSION_ID -lt 9 ]]; then
 				echo "⚠️ Your version of Debian is not supported."
 				echo ""
-				echo "However, if you're using Debian >= 9 or unstable/testing, you can continue at your own risk."
+				echo "However, if you're using Debian >= 9 or unstable/testing then you can continue, at your own risk."
 				echo ""
 				until [[ $CONTINUE =~ (y|n) ]]; do
 					read -rp "Continue? [y/n]: " -e CONTINUE
@@ -40,7 +40,7 @@ function checkOS() {
 			if [[ $MAJOR_UBUNTU_VERSION -lt 16 ]]; then
 				echo "⚠️ Your version of Ubuntu is not supported."
 				echo ""
-				echo "However, if you're using Ubuntu >= 16.04 or beta, you can continue at your own risk."
+				echo "However, if you're using Ubuntu >= 16.04 or beta, then you can continue, at your own risk."
 				echo ""
 				until [[ $CONTINUE =~ (y|n) ]]; do
 					read -rp "Continue? [y/n]: " -e CONTINUE
@@ -60,7 +60,7 @@ function checkOS() {
 			if [[ ${VERSION_ID%.*} -lt 7 ]]; then
 				echo "⚠️ Your version of CentOS is not supported."
 				echo ""
-				echo "The script only supports CentOS 7 and CentOS 8."
+				echo "The script only support CentOS 7 and CentOS 8."
 				echo ""
 				exit 1
 			fi
@@ -70,7 +70,7 @@ function checkOS() {
 			if [[ ! $VERSION_ID =~ (8) ]]; then
 				echo "Your version of Oracle Linux is not supported."
 				echo ""
-				echo "The script only supports Oracle Linux 8."
+				echo "The script only support Oracle Linux 8."
 				exit 1
 			fi
 		fi
@@ -82,7 +82,7 @@ function checkOS() {
 			else
 				echo "⚠️ Your version of Amazon Linux is not supported."
 				echo ""
-				echo "The script only supports Amazon Linux 2 or Amazon Linux 2023.6+"
+				echo "The script only support Amazon Linux 2 or Amazon Linux 2023.6+"
 				echo ""
 				exit 1
 			fi
@@ -90,18 +90,18 @@ function checkOS() {
 	elif [[ -e /etc/arch-release ]]; then
 		OS=arch
 	else
-		echo "It looks like you aren't running this installer on a Debian, Ubuntu, Fedora, CentOS, Amazon Linux 2, Oracle Linux 8 or Arch Linux system."
+		echo "Looks like you aren't running this installer on a Debian, Ubuntu, Fedora, CentOS, Amazon Linux 2, Oracle Linux 8 or Arch Linux system"
 		exit 1
 	fi
 }
 
 function initialCheck() {
 	if ! isRoot; then
-		echo "Sorry, you need to run this script as root."
+		echo "Sorry, you need to run this as root"
 		exit 1
 	fi
 	if ! tunAvailable; then
-		echo "TUN is not available."
+		echo "TUN is not available"
 		exit 1
 	fi
 	checkOS
@@ -258,13 +258,58 @@ function resolvePublicIP() {
 	echo "$PUBLIC_IP"
 }
 
+function configureAccessibleSubnets() {
+	echo ""
+	echo "Configuration des subnets accessibles depuis le VPN"
+	echo "Par défaut, le VPN donne accès à Internet. Voulez-vous configurer l'accès à des subnets locaux spécifiques ?"
+	echo "   1) Accès Internet seulement (par défaut)"
+	echo "   2) Configurer des subnets locaux accessibles"
+	until [[ $SUBNET_CONFIG =~ ^[1-2]$ ]]; do
+		read -rp "Choix [1-2]: " -e -i 1 SUBNET_CONFIG
+	done
+
+	ACCESSIBLE_SUBNETS=()
+	if [[ $SUBNET_CONFIG == "2" ]]; then
+		echo ""
+		echo "Entrez les subnets que vous voulez rendre accessibles depuis le VPN"
+		echo "Format: réseau/masque (ex: 192.168.1.0/24, 10.0.0.0/8, 172.16.0.0/12)"
+		echo "Laissez vide et appuyez sur Entrée pour terminer"
+		
+		while true; do
+			read -rp "Subnet (ou Entrée pour terminer): " SUBNET
+			if [[ -z $SUBNET ]]; then
+				break
+			fi
+			
+			# Validation basique du format subnet
+			if [[ $SUBNET =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+				ACCESSIBLE_SUBNETS+=("$SUBNET")
+				echo "Ajouté: $SUBNET"
+			else
+				echo "Format invalide. Utilisez le format: xxx.xxx.xxx.xxx/xx"
+			fi
+		done
+		
+		if [[ ${#ACCESSIBLE_SUBNETS[@]} -eq 0 ]]; then
+			echo "Aucun subnet configuré, utilisation de la configuration par défaut (Internet)"
+			SUBNET_CONFIG="1"
+		else
+			echo ""
+			echo "Subnets configurés:"
+			for subnet in "${ACCESSIBLE_SUBNETS[@]}"; do
+				echo "  - $subnet"
+			done
+		fi
+	fi
+}
+
 function installQuestions() {
 	echo "Welcome to the OpenVPN installer!"
 	echo "The git repository is available at: https://github.com/angristan/openvpn-install"
 	echo ""
 
 	echo "I need to ask you a few questions before starting the setup."
-	echo "You can leave the default options and just press enter if you are okay with them."
+	echo "You can leave the default options and just press enter if you are ok with them."
 	echo ""
 	echo "I need to know the IPv4 address of the network interface you want OpenVPN listening to."
 	echo "Unless your server is behind NAT, it should be your public IPv4 address."
@@ -280,7 +325,7 @@ function installQuestions() {
 	if [[ $APPROVE_IP =~ n ]]; then
 		read -rp "IP address: " -e -i "$IP" IP
 	fi
-	# If $IP is a private IP address, the server must be behind NAT
+	# If $IP is a private IP address, the server must be behind NAT
 	if echo "$IP" | grep -qE '^(10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168)'; then
 		echo ""
 		echo "It seems this server is behind NAT. What is its public IPv4 address or hostname?"
@@ -428,7 +473,7 @@ function installQuestions() {
 	echo ""
 	echo "Do you want to customize encryption settings?"
 	echo "Unless you know what you're doing, you should stick with the default parameters provided by the script."
-	echo "Note that whatever you choose, all the choices presented in the script are safe (unlike OpenVPN's defaults)."
+	echo "Note that whatever you choose, all the choices presented in the script are safe. (Unlike OpenVPN's defaults)"
 	echo "See https://github.com/angristan/openvpn-install#security-and-encryption to learn more."
 	echo ""
 	until [[ $CUSTOMIZE_ENC =~ (y|n) ]]; do
@@ -646,9 +691,32 @@ function installQuestions() {
 			read -rp "Control channel additional security mechanism [1-2]: " -e -i 1 TLS_SIG
 		done
 	fi
+
+	# Configuration des subnets accessibles
+	configureAccessibleSubnets
+	
+	echo ""
+	echo "Combien de fichiers de configuration client voulez-vous générer ?"
+	until [[ $CLIENT_COUNT =~ ^[0-9]+$ ]] && [ "$CLIENT_COUNT" -ge 1 ] && [ "$CLIENT_COUNT" -le 100 ]; do
+		read -rp "Nombre de clients [1-100]: " -e -i 1 CLIENT_COUNT
+	done
+	
+	echo ""
+	echo "Combien de jours les certificats clients doivent-ils être valides ?"
+	read -rp "Nombre de jours (par défaut 3650, soit environ 10 ans): " -e -i 3650 DAYS_VALID
+
+	echo ""
+	echo "Voulez-vous protéger les fichiers de configuration avec un mot de passe ?"
+	echo "(c'est-à-dire chiffrer les clés privées avec un mot de passe)"
+	echo "   1) Clients sans mot de passe"
+	echo "   2) Utiliser un mot de passe pour les clients"
+	until [[ $PASS =~ ^[1-2]$ ]]; do
+		read -rp "Sélectionnez une option [1-2]: " -e -i 1 PASS
+	done
+
 	echo ""
 	echo "Okay, that was all I needed. We are ready to setup your OpenVPN server now."
-	echo "You will be able to generate a client at the end of the installation."
+	echo "You will be able to generate $CLIENT_COUNT client configuration(s) at the end of the installation."
 	APPROVE_INSTALL=${APPROVE_INSTALL:-n}
 	if [[ $APPROVE_INSTALL =~ n ]]; then
 		read -n1 -r -p "Press any key to continue..."
@@ -666,9 +734,10 @@ function installOpenVPN() {
 		DNS=${DNS:-1}
 		COMPRESSION_ENABLED=${COMPRESSION_ENABLED:-n}
 		CUSTOMIZE_ENC=${CUSTOMIZE_ENC:-n}
-		CLIENT=${CLIENT:-client}
+		CLIENT_COUNT=${CLIENT_COUNT:-1}
 		PASS=${PASS:-1}
 		CONTINUE=${CONTINUE:-y}
+		SUBNET_CONFIG=${SUBNET_CONFIG:-1}
 
 		if [[ -z $ENDPOINT ]]; then
 			ENDPOINT=$(resolvePublicIP)
@@ -687,7 +756,7 @@ function installOpenVPN() {
 	# $NIC can not be empty for script rm-openvpn-rules.sh
 	if [[ -z $NIC ]]; then
 		echo
-		echo "Could not detect public interface."
+		echo "Can not detect public interface."
 		echo "This needs for setup MASQUERADE."
 		until [[ $CONTINUE =~ (y|n) ]]; do
 			read -rp "Continue? [y/n]: " -e CONTINUE
@@ -895,7 +964,17 @@ ifconfig-pool-persist ipp.txt" >>/etc/openvpn/server.conf
 		fi
 		;;
 	esac
-	echo 'push "redirect-gateway def1 bypass-dhcp"' >>/etc/openvpn/server.conf
+
+	# Configuration des routes selon le choix de l'utilisateur
+	if [[ $SUBNET_CONFIG == "1" ]]; then
+		# Accès Internet par défaut
+		echo 'push "redirect-gateway def1 bypass-dhcp"' >>/etc/openvpn/server.conf
+	else
+		# Accès aux subnets spécifiques uniquement
+		for subnet in "${ACCESSIBLE_SUBNETS[@]}"; do
+			echo "push \"route $subnet\"" >>/etc/openvpn/server.conf
+		done
+	fi
 
 	# IPv6 network settings if needed
 	if [[ $IPV6_SUPPORT == 'y' ]]; then
@@ -1009,6 +1088,14 @@ iptables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
 iptables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT
 iptables -I INPUT 1 -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" >/etc/iptables/add-openvpn-rules.sh
 
+	# Add rules for accessible subnets if configured
+	if [[ $SUBNET_CONFIG == "2" ]]; then
+		for subnet in "${ACCESSIBLE_SUBNETS[@]}"; do
+			echo "iptables -I FORWARD 1 -i tun0 -d $subnet -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
+			echo "iptables -I FORWARD 1 -s $subnet -o tun0 -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
+		done
+	fi
+
 	if [[ $IPV6_SUPPORT == 'y' ]]; then
 		echo "ip6tables -t nat -I POSTROUTING 1 -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
 ip6tables -I INPUT 1 -i tun0 -j ACCEPT
@@ -1024,6 +1111,14 @@ iptables -D INPUT -i tun0 -j ACCEPT
 iptables -D FORWARD -i $NIC -o tun0 -j ACCEPT
 iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT
 iptables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" >/etc/iptables/rm-openvpn-rules.sh
+
+	# Remove rules for accessible subnets if configured
+	if [[ $SUBNET_CONFIG == "2" ]]; then
+		for subnet in "${ACCESSIBLE_SUBNETS[@]}"; do
+			echo "iptables -D FORWARD -i tun0 -d $subnet -j ACCEPT" >>/etc/iptables/rm-openvpn-rules.sh
+			echo "iptables -D FORWARD -s $subnet -o tun0 -j ACCEPT" >>/etc/iptables/rm-openvpn-rules.sh
+		done
+	fi
 
 	if [[ $IPV6_SUPPORT == 'y' ]]; then
 		echo "ip6tables -t nat -D POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
@@ -1091,108 +1186,159 @@ verb 3" >>/etc/openvpn/client-template.txt
 		echo "compress $COMPRESSION_ALG" >>/etc/openvpn/client-template.txt
 	fi
 
-	# Generate the custom client.ovpn
-	newClient
+	# Generate multiple client configurations
+	generateMultipleClients
 	echo "If you want to add more clients, you simply need to run this script another time!"
 }
-
-function newClient() {
+function generateMultipleClients() {
 	echo ""
-	echo "Tell me a name for the client."
-	echo "The name must consist of alphanumeric character. It may also include an underscore or a dash."
-
-	until [[ $CLIENT =~ ^[a-zA-Z0-9_-]+$ ]]; do
-		read -rp "Client name: " -e CLIENT
-	done
-
-	echo ""
-	echo "Do you want to protect the configuration file with a password?"
-	echo "(e.g. encrypt the private key with a password)"
-	echo "   1) Add a passwordless client"
-	echo "   2) Use a password for the client"
-
-	until [[ $PASS =~ ^[1-2]$ ]]; do
-		read -rp "Select an option [1-2]: " -e -i 1 PASS
-	done
-
-	CLIENTEXISTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c -E "/CN=$CLIENT\$")
-	if [[ $CLIENTEXISTS == '1' ]]; then
-		echo ""
-		echo "The specified client CN was already found in easy-rsa, please choose another name."
-		exit
-	else
-		cd /etc/openvpn/easy-rsa/ || return
-		case $PASS in
-		1)
-			EASYRSA_CERT_EXPIRE=3650 ./easyrsa --batch build-client-full "$CLIENT" nopass
-			;;
-		2)
-			echo "⚠️ You will be asked for the client password below ⚠️"
-			EASYRSA_CERT_EXPIRE=3650 ./easyrsa --batch build-client-full "$CLIENT"
-			;;
-		esac
-		echo "Client $CLIENT added."
-	fi
-
-	# Home directory of the user, where the client configuration will be written
-	if [ -e "/home/${CLIENT}" ]; then
-		# if $1 is a user name
-		homeDir="/home/${CLIENT}"
-	elif [ "${SUDO_USER}" ]; then
-		# if not, use SUDO_USER
+	echo "Génération de $CLIENT_COUNT fichier(s) de configuration client(s)..."
+	
+	# Home directory where the client configurations will be written
+	if [ "${SUDO_USER}" ]; then
 		if [ "${SUDO_USER}" == "root" ]; then
-			# If running sudo as root
 			homeDir="/root"
 		else
 			homeDir="/home/${SUDO_USER}"
 		fi
 	else
-		# if not SUDO_USER, use /root
 		homeDir="/root"
 	fi
-
-	# Determine if we use tls-auth or tls-crypt
-	if grep -qs "^tls-crypt" /etc/openvpn/server.conf; then
-		TLS_SIG="1"
-	elif grep -qs "^tls-auth" /etc/openvpn/server.conf; then
-		TLS_SIG="2"
-	fi
-
-	# Generates the custom client.ovpn
-	cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
-	{
-		echo "<ca>"
-		cat "/etc/openvpn/easy-rsa/pki/ca.crt"
-		echo "</ca>"
-
-		echo "<cert>"
-		awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
-		echo "</cert>"
-
-		echo "<key>"
-		cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
-		echo "</key>"
-
-		case $TLS_SIG in
+	
+	# Create a directory for all client configurations
+	CLIENT_DIR="$homeDir/openvpn-clients-$(date +%Y%m%d-%H%M%S)"
+	mkdir -p "$CLIENT_DIR"
+	
+	for ((i=1; i<=CLIENT_COUNT; i++)); do
+		# Generate a unique client name
+		CLIENT="client$(printf "%03d" $i)"
+		
+		echo "Génération du client $i/$CLIENT_COUNT: $CLIENT"
+		
+		# Check if client already exists
+		CLIENTEXISTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c -E "/CN=$CLIENT\$")
+		if [[ $CLIENTEXISTS == '1' ]]; then
+			echo ""
+			echo "Le certificat pour le client $CLIENT existe déjà, on passe au suivant."
+			continue
+		fi
+		
+		cd /etc/openvpn/easy-rsa/ || return
+		
+		case $PASS in
 		1)
-			echo "<tls-crypt>"
-			cat /etc/openvpn/tls-crypt.key
-			echo "</tls-crypt>"
+			EASYRSA_CERT_EXPIRE=$DAYS_VALID ./easyrsa --batch build-client-full "$CLIENT" nopass
 			;;
 		2)
-			echo "key-direction 1"
-			echo "<tls-auth>"
-			cat /etc/openvpn/tls-auth.key
-			echo "</tls-auth>"
+			echo "⚠️  Vous allez être invité à saisir un mot de passe pour protéger la clé privée du client $CLIENT."
+			echo "    Notez ce mot de passe car il sera nécessaire pour utiliser la configuration."
+			EASYRSA_CERT_EXPIRE=$DAYS_VALID ./easyrsa --batch build-client-full "$CLIENT"
 			;;
 		esac
-	} >>"$homeDir/$CLIENT.ovpn"
+		
+		# Determine if we use tls-auth or tls-crypt
+		if grep -qs "^tls-crypt" /etc/openvpn/server.conf; then
+			TLS_SIG="1"
+		elif grep -qs "^tls-auth" /etc/openvpn/server.conf; then
+			TLS_SIG="2"
+		fi
+		
+		# Generates the custom client.ovpn
+		cp /etc/openvpn/client-template.txt "$CLIENT_DIR/$CLIENT.ovpn"
+		{
+			echo "<ca>"
+			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
+			echo "</ca>"
+			
+			echo "<cert>"
+			awk '/BEGIN/,/END/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
+			echo "</cert>"
+			
+			echo "<key>"
+			cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
+			echo "</key>"
+			
+			case $TLS_SIG in
+			1)
+				echo "<tls-crypt>"
+				cat /etc/openvpn/tls-crypt.key
+				echo "</tls-crypt>"
+				;;
+			2)
+				echo "key-direction 1"
+				echo "<tls-auth>"
+				cat /etc/openvpn/tls-auth.key
+				echo "</tls-auth>"
+				;;
+			esac
+		} >>"$CLIENT_DIR/$CLIENT.ovpn"
+		
+		echo ""
+		echo "La configuration du client $CLIENT a été écrite dans $CLIENT_DIR/$CLIENT.ovpn."
+	done
+	
+	# Create a summary file
+	echo "OpenVPN Client Configurations Generated on $(date)" > "$CLIENT_DIR/README.txt"
+	echo "=================================================" >> "$CLIENT_DIR/README.txt"
+	echo "" >> "$CLIENT_DIR/README.txt"
+	echo "Server: $IP:$PORT ($PROTOCOL)" >> "$CLIENT_DIR/README.txt"
+	echo "Generated clients: $CLIENT_COUNT" >> "$CLIENT_DIR/README.txt"
+	echo "Certificate validity: $DAYS_VALID days" >> "$CLIENT_DIR/README.txt"
+	echo "Password protection: $(if [[ $PASS == '1' ]]; then echo 'No'; else echo 'Yes'; fi)" >> "$CLIENT_DIR/README.txt"
+	echo "" >> "$CLIENT_DIR/README.txt"
+	
+	if [[ $SUBNET_CONFIG == "2" ]]; then
+		echo "Accessible subnets:" >> "$CLIENT_DIR/README.txt"
+		for subnet in "${ACCESSIBLE_SUBNETS[@]}"; do
+			echo "  - $subnet" >> "$CLIENT_DIR/README.txt"
+		done
+	else
+		echo "Network access: Full Internet access" >> "$CLIENT_DIR/README.txt"
+	fi
+	
+	echo "" >> "$CLIENT_DIR/README.txt"
+	echo "Client files:" >> "$CLIENT_DIR/README.txt"
+	for ((i=1; i<=CLIENT_COUNT; i++)); do
+		CLIENT="client$(printf "%03d" $i)"
+		echo "  - $CLIENT.ovpn" >> "$CLIENT_DIR/README.txt"
+	done
+	
+	echo ""
+	echo "🎉 Tous les fichiers de configuration ont été générés dans: $CLIENT_DIR"
+	echo "📁 Vous trouverez également un fichier README.txt avec le résumé de la configuration."
+	
+	# Set proper permissions
+	chmod 600 "$CLIENT_DIR"/*.ovpn
+	if [ "${SUDO_USER}" ] && [ "${SUDO_USER}" != "root" ]; then
+		chown -R "${SUDO_USER}:${SUDO_USER}" "$CLIENT_DIR"
+	fi
+	
+	echo ""
+	echo "⚠️  Important: Gardez ces fichiers de configuration en sécurité !"
+	echo "   Chaque fichier .ovpn contient les clés privées nécessaires pour se connecter au VPN."
+}
+
+function newClient() {
+	echo ""
+	echo "Combien de nouveaux clients voulez-vous créer ?"
+	until [[ $CLIENT_COUNT =~ ^[0-9]+$ ]] && [ "$CLIENT_COUNT" -ge 1 ] && [ "$CLIENT_COUNT" -le 100 ]; do
+		read -rp "Nombre de clients [1-100]: " -e -i 1 CLIENT_COUNT
+	done
+	
+	echo ""
+	echo "Combien de jours les certificats clients doivent-ils être valides ?"
+	read -rp "Nombre de jours (par défaut 3650, soit environ 10 ans): " -e -i 3650 DAYS_VALID
 
 	echo ""
-	echo "The configuration file has been written to $homeDir/$CLIENT.ovpn."
-	echo "Download the .ovpn file and import it in your OpenVPN client."
-
-	exit 0
+	echo "Voulez-vous protéger les fichiers de configuration avec un mot de passe ?"
+	echo "(c'est-à-dire chiffrer les clés privées avec un mot de passe)"
+	echo "   1) Clients sans mot de passe"
+	echo "   2) Utiliser un mot de passe pour les clients"
+	until [[ $PASS =~ ^[1-2]$ ]]; do
+		read -rp "Sélectionnez une option [1-2]: " -e -i 1 PASS
+	done
+	
+	generateMultipleClients
 }
 
 function revokeClient() {
@@ -1348,7 +1494,7 @@ function manageMenu() {
 	echo "It looks like OpenVPN is already installed."
 	echo ""
 	echo "What do you want to do?"
-	echo "   1) Add a new user"
+	echo "   1) Add new user(s)"
 	echo "   2) Revoke existing user"
 	echo "   3) Remove OpenVPN"
 	echo "   4) Exit"
