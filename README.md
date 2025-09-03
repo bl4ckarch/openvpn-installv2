@@ -8,7 +8,7 @@ OpenVPN installer for Debian, Ubuntu, Fedora, CentOS, Arch Linux, Oracle Linux, 
 
 This script will let you setup your own secure VPN server in just a few seconds.
 
-You can also check out [wireguard-install](https://github.com/angristan/wireguard-install), a simple installer for a simpler, safer, faster and more modern VPN protocol.
+You can also check out [wireguard-install](https://github.com/angristan/wireguard-install), a simple installer for a simpler, safer, faster and more modernVPN protocol.
 
 ## What is this?
 
@@ -50,11 +50,11 @@ The first time you run it, you'll have to follow the assistant and answer a few 
 
 When OpenVPN is installed, you can run the script again, and you will get the choice to:
 
-- Add a client
+- Add client(s) - **NEW: Generate multiple clients at once**
 - Remove a client
 - Uninstall OpenVPN
 
-In your home directory, you will have `.ovpn` files. These are the client configuration files. Download them from your server and connect using your favorite OpenVPN client.
+In your home directory, you will have `.ovpn` files organized in timestamped folders. These are the client configuration files. Download them from your server and connect using your favorite OpenVPN client.
 
 If you have any question, head to the [FAQ](#faq) first. And if you need help, you can open a [discussion](https://github.com/angristan/openvpn-install/discussions). Please search existing issues and dicussions first.
 
@@ -85,12 +85,38 @@ If you want to customise your installation, you can export them or specify them 
 - `DNS=1`
 - `COMPRESSION_ENABLED=n`
 - `CUSTOMIZE_ENC=n`
-- `CLIENT=clientname`
+- `CLIENT_COUNT=1` - **NEW: Number of clients to generate**
 - `PASS=1`
+- `SUBNET_CONFIG=1` - **NEW: Subnet access configuration (1=Internet, 2=Custom subnets)**
 
 If the server is behind NAT, you can specify its endpoint with the `ENDPOINT` variable. If the endpoint is the public IP address which it is behind, you can use `ENDPOINT=$(curl -4 ifconfig.co)` (the script will default to this). The endpoint can be an IPv4 or a domain.
 
 Other variables can be set depending on your choice (encryption, compression). You can search for them in the `installQuestions()` function of the script.
+
+#### Custom Subnet Access Configuration
+
+**NEW FEATURE**: You can now configure specific subnet access instead of full internet routing:
+
+```bash
+# For custom subnet access, set these variables:
+export SUBNET_CONFIG=2
+export ACCESSIBLE_SUBNETS=("192.168.1.0/24" "10.0.0.0/8" "172.16.0.0/12")
+```
+
+This allows you to create VPN configurations that only provide access to specific local networks rather than routing all internet traffic.
+
+#### Multiple Client Generation
+
+**NEW FEATURE**: Generate multiple client configurations automatically:
+
+```bash
+# Generate 10 client configurations at once
+export CLIENT_COUNT=10
+export DAYS_VALID=3650
+export PASS=1
+```
+
+Clients will be automatically named `client001`, `client002`, etc., and organized in a timestamped directory with a README file containing configuration details.
 
 Password-protected clients are not supported by the headless installation method since user input is expected by Easy-RSA.
 
@@ -98,15 +124,16 @@ The headless install is more-or-less idempotent, in that it has been made safe t
 
 ### Headless User Addition
 
-It's also possible to automate the addition of a new user. Here, the key is to provide the (string) value of the `MENU_OPTION` variable along with the remaining mandatory variables before invoking the script.
+It's also possible to automate the addition of new users. Here, the key is to provide the (string) value of the `MENU_OPTION` variable along with the remaining mandatory variables before invoking the script.
 
-The following Bash script adds a new user `foo` to an existing OpenVPN configuration
+The following Bash script adds multiple new users to an existing OpenVPN configuration:
 
 ```bash
 #!/bin/bash
 export MENU_OPTION="1"
-export CLIENT="foo"
+export CLIENT_COUNT="5"  # Generate 5 new clients
 export PASS="1"
+export DAYS_VALID="3650"
 ./openvpn-install.sh
 ```
 
@@ -126,7 +153,39 @@ export PASS="1"
 - Block DNS leaks on Windows 10
 - Randomised server certificate name
 - Choice to protect clients with a password (private key encryption)
+- **NEW: Multiple client generation** - Generate multiple client configurations automatically
+- **NEW: Custom subnet routing** - Configure access to specific local networks instead of full internet routing
+- **NEW: Organized client files** - Client configurations are organized in timestamped directories with documentation
 - Many other little things!
+
+## New Features Details
+
+### Multiple Client Generation
+
+Instead of generating clients one by one, you can now:
+- Specify the number of clients to generate (1-100)
+- Automatically named clients (`client001`, `client002`, etc.)
+- All configurations generated in a single timestamped folder
+- Automatic README file with configuration summary
+- Proper file permissions and ownership
+
+### Custom Subnet Access
+
+Configure VPN to provide access to specific networks only:
+- **Internet Access (Default)**: Full internet routing through VPN
+- **Custom Subnets**: Access only to specified local networks
+- Examples: `192.168.1.0/24`, `10.0.0.0/8`, `172.16.0.0/12`
+- Useful for accessing corporate networks or home LANs without routing all traffic
+
+### Enhanced Organization
+
+- Client configurations stored in `~/openvpn-clients-YYYYMMDD-HHMMSS/` directories
+- Automatic README.txt file with:
+  - Server connection details
+  - Number of generated clients
+  - Certificate validity period
+  - Network access configuration
+  - List of generated client files
 
 ## Compatibility
 
@@ -158,7 +217,7 @@ To be noted:
 
 This script is based on the great work of [Nyr and its contributors](https://github.com/Nyr/openvpn-install).
 
-Since 2016, the two scripts have diverged and are not alike anymore, especially under the hood. The main goal of the script was enhanced security. But since then, the script has been completely rewritten and a lot a features have been added. The script is only compatible with recent distributions though, so if you need to use a very old server or client, I advise using Nyr's script.
+Since 2016, the two scripts have diverged and are not alike anymore, especially under the hood. The main goal of the script was enhanced security. But since then, the script has been completely rewritten and a lot a features have been added. The script is only compatible with recent distributions though, so ifyou need to use a very old server or client, I advise using Nyr's script.
 
 ## FAQ
 
@@ -186,9 +245,21 @@ More Q&A in [FAQ.md](FAQ.md).
 
 ---
 
+**Q:** How do I configure custom subnet access?
+
+**A:** During installation, choose option 2 when asked about subnet configuration. Enter the networks you want to access in CIDR notation (e.g., 192.168.1.0/24). This is useful when you want the VPN to provide access to specific local networks without routing all internet traffic through the VPN.
+
+---
+
+**Q:** Can I generate multiple client configurations at once?
+
+**A:** Yes! When adding clients, you can specify how many client configurations to generate (1-100). They will be automatically named client001, client002,etc., and organized in a timestamped folder with a README file containing all the details.
+
+---
+
 **Q:** Am I safe from the NSA by using your script?
 
-**A:** Please review your threat models. Even if this script has security in mind and uses state-of-the-art encryption, you shouldn't be using a VPN if you want to hide from the NSA.
+**A:** Please review your threat models. Even if this script has security in mind and uses state-of-the-art encryption, you shouldn't be using a VPN if youwant to hide from the NSA.
 
 ---
 
@@ -215,7 +286,7 @@ Please open an issue before submitting a PR if you want to discuss a change, esp
 
 ### Code formatting
 
-We use [shellcheck](https://github.com/koalaman/shellcheck) and [shfmt](https://github.com/mvdan/sh) to enforce bash styling guidelines and good practices. They are executed for each commit / PR with GitHub Actions, so you can check the configuration [here](https://github.com/angristan/openvpn-install/blob/master/.github/workflows/push.yml).
+We use [shellcheck](https://github.com/koalaman/shellcheck) and [shfmt](https://github.com/mvdan/sh) to enforce bash styling guidelines and good practices.They are executed for each commit / PR with GitHub Actions, so you can check the configuration [here](https://github.com/angristan/openvpn-install/blob/master/.github/workflows/push.yml).
 
 ## Security and Encryption
 
@@ -226,7 +297,7 @@ OpenVPN's default settings are pretty weak regarding encryption. This script aim
 
 OpenVPN 2.4 was a great update regarding encryption. It added support for ECDSA, ECDH, AES GCM, NCP and tls-crypt.
 
-If you want more information about an option mentioned below, head to the [OpenVPN manual](https://community.openvpn.net/openvpn/wiki/Openvpn24ManPage). It is very complete.
+If you want more information about an option mentioned below, head to the [OpenVPN manual](https://community.openvpn.net/openvpn/wiki/Openvpn24ManPage). Itis very complete.
 
 Most of OpenVPN's encryption-related stuff is managed by [Easy-RSA](https://github.com/OpenVPN/easy-rsa). Defaults parameters are in the [vars.example](https://github.com/OpenVPN/easy-rsa/blob/v3.0.7/easyrsa3/vars.example) file.
 
@@ -272,7 +343,7 @@ By default, OpenVPN uses `BF-CBC` as the data channel cipher. Blowfish is an old
 
 Indeed, AES is today's standard. It's the fastest and more secure cipher available today. [SEED](https://en.wikipedia.org/wiki/SEED) and [Camellia](<https://en.wikipedia.org/wiki/Camellia_(cipher)>) are not vulnerable to date but are slower than AES and relatively less trusted.
 
-> Of the currently supported ciphers, OpenVPN currently recommends using AES-256-CBC or AES-128-CBC. OpenVPN 2.4 and newer will also support GCM. For 2.4+, we recommend using AES-256-GCM or AES-128-GCM.
+> Of the currently supported ciphers, OpenVPN currently recommends using AES-256-CBC or AES-128-CBC. OpenVPN 2.4 and newer will also support GCM. For 2.4+,we recommend using AES-256-GCM or AES-128-GCM.
 
 AES-256 is 40% slower than AES-128, and there isn't any real reason to use a 256 bits key over a 128 bits key with AES. (Source: [1](http://security.stackexchange.com/questions/14068/why-most-people-use-256-bit-encryption-instead-of-128-bit),[2](http://security.stackexchange.com/questions/6141/amount-of-simple-operations-that-is-safely-out-of-reach-for-all-humanity/6149#6149)). Moreover, AES-256 is more vulnerable to [Timing attacks](https://en.wikipedia.org/wiki/Timing_attack).
 
@@ -325,7 +396,7 @@ It defaults to `prime256v1`.
 
 From the OpenVPN wiki, about `--auth`:
 
-> Authenticate data channel packets and (if enabled) tls-auth control channel packets with HMAC using message digest algorithm alg. (The default is SHA1 ). HMAC is a commonly used message authentication algorithm (MAC) that uses a data string, a secure hash algorithm, and a key, to produce a digital signature.
+> Authenticate data channel packets and (if enabled) tls-auth control channel packets with HMAC using message digest algorithm alg. (The default is SHA1 ).HMAC is a commonly used message authentication algorithm (MAC) that uses a data string, a secure hash algorithm, and a key, to produce a digital signature.
 >
 > If an AEAD cipher mode (e.g. GCM) is chosen, the specified --auth algorithm is ignored for the data channel, and the authentication method of the AEAD cipher is used instead. Note that alg still specifies the digest used for tls-auth.
 
